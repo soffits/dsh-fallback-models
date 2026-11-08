@@ -21,8 +21,9 @@ window.__ModuleLoader__.load({
     const STYLE_ID = 'dsh-fallback-models'
 
     // Keep in step with src/policy.js DEFAULT_CODES.
-    const DEFAULT_CODES = ['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE', 'QUOTA', 'ACCOUNT_QUOTA', 'UNKNOWN_MODEL', 'MODEL_UNSUPPORTED']
-    const OPTIONAL_CODES = ['AUTH', 'MISSING_CREDENTIAL', 'INVALID_CREDENTIAL', 'NO_ADAPTER', 'CONTEXT_WINDOW_EXCEEDED', 'INVALID_REQUEST']
+    const DEFAULT_CODES = ['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE', 'QUOTA', 'ACCOUNT_QUOTA', 'PI_AI_ERROR']
+    // Codes a model stream can report that stay off by default.
+    const OPTIONAL_CODES = ['AUTH', 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED']
 
     // ---------------------------------------------------------------- text
 
@@ -54,7 +55,7 @@ window.__ModuleLoader__.load({
       'scope.turn': 'Go back to the session\'s own model when that turn ends',
       'scope.session': 'Keep the fallback for the rest of the session',
       'codes.title': 'Switch on these failures',
-      'codes.help': 'DSH\'s own retries run first. A cancelled request never switches. Credential and setup errors are off by default, because switching would hide a problem you probably want to fix.',
+      'codes.help': 'DSH\'s own retries run first. A cancelled request never switches. Rejected credentials and invalid requests are off by default, because switching would hide a problem you probably want to fix.',
       'code.RATE_LIMIT': 'Rate limited',
       'code.SERVER': 'Provider server error',
       'code.TIMEOUT': 'Timed out',
@@ -62,12 +63,8 @@ window.__ModuleLoader__.load({
       'code.EMPTY_RESPONSE': 'Empty response',
       'code.QUOTA': 'Quota or balance used up',
       'code.ACCOUNT_QUOTA': 'Account quota used up',
-      'code.UNKNOWN_MODEL': 'Model not found',
-      'code.MODEL_UNSUPPORTED': 'Model not supported',
+      'code.PI_AI_ERROR': 'Other provider error (for example, model not found)',
       'code.AUTH': 'Authentication failed',
-      'code.MISSING_CREDENTIAL': 'Credential missing',
-      'code.INVALID_CREDENTIAL': 'Credential invalid',
-      'code.NO_ADAPTER': 'Provider not set up',
       'code.CONTEXT_WINDOW_EXCEEDED': 'Context window exceeded',
       'code.INVALID_REQUEST': 'Request rejected as invalid',
       'catalog.loading': 'Loading models…',
@@ -109,7 +106,7 @@ window.__ModuleLoader__.load({
       'scope.turn': '这一轮结束后回到会话原来的模型',
       'scope.session': '本会话之后一直用备用模型',
       'codes.title': '遇到这些失败时切换',
-      'codes.help': 'DSH 自己的重试先进行。取消的请求从不切换。凭据和配置错误默认不切换，因为切换会掩盖你多半想修好的问题。',
+      'codes.help': 'DSH 自己的重试先进行。取消的请求从不切换。凭据被拒和无效请求默认不切换，因为切换会掩盖你多半想修好的问题。',
       'code.RATE_LIMIT': '被限流',
       'code.SERVER': '提供方服务器错误',
       'code.TIMEOUT': '超时',
@@ -117,12 +114,8 @@ window.__ModuleLoader__.load({
       'code.EMPTY_RESPONSE': '空回复',
       'code.QUOTA': '额度或余额用完',
       'code.ACCOUNT_QUOTA': '账户额度用完',
-      'code.UNKNOWN_MODEL': '找不到模型',
-      'code.MODEL_UNSUPPORTED': '模型不受支持',
+      'code.PI_AI_ERROR': '其他提供方错误（例如找不到模型）',
       'code.AUTH': '认证失败',
-      'code.MISSING_CREDENTIAL': '缺少凭据',
-      'code.INVALID_CREDENTIAL': '凭据无效',
-      'code.NO_ADAPTER': '提供方未配置',
       'code.CONTEXT_WINDOW_EXCEEDED': '超出上下文窗口',
       'code.INVALID_REQUEST': '请求被判为无效',
       'catalog.loading': '正在加载模型…',

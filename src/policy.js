@@ -4,8 +4,15 @@
 
 /**
  * Failure codes that switch to the next model by default. They mean the model
- * could not answer right now (overloaded, down, out of quota, gone), so
- * another model can. DSH's own retry runs first for the transient ones.
+ * could not answer right now (overloaded, down, out of quota), so another
+ * model can. DSH's own retry runs first for the transient ones.
+ *
+ * Only failures a model stream reports reach the recovery point. Errors DSH
+ * raises while preparing a request (UNKNOWN_MODEL, MODEL_UNSUPPORTED,
+ * MISSING_CREDENTIAL, NO_ADAPTER) end the turn before any request is sent, so
+ * listing them would do nothing. PI_AI_ERROR is the pi-ai adapter's code for
+ * a provider error it cannot classify, such as a 404 for a model the provider
+ * no longer serves.
  */
 export const DEFAULT_CODES = Object.freeze([
   'RATE_LIMIT',
@@ -15,8 +22,7 @@ export const DEFAULT_CODES = Object.freeze([
   'EMPTY_RESPONSE',
   'QUOTA',
   'ACCOUNT_QUOTA',
-  'UNKNOWN_MODEL',
-  'MODEL_UNSUPPORTED',
+  'PI_AI_ERROR',
 ])
 
 /**

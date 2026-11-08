@@ -77,3 +77,11 @@ test('registers a Configure page for its own row and renders summary and page', 
   const readOnly = renderToStaticMarkup(React.createElement(component, { ...props, view: 'page', form: form(value, { writable: false }) }))
   assert.match(readOnly, /read-only/)
 })
+
+test('the settings page offers the same default codes as the host', async () => {
+  const { DEFAULT_CODES } = await import('../src/policy.js')
+  const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
+  const match = source.match(/const DEFAULT_CODES = (\[[^\]]*\])/)
+  assert.ok(match)
+  assert.deepEqual(JSON.parse(match[1].replace(/'/g, '"')), [...DEFAULT_CODES])
+})

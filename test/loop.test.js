@@ -192,3 +192,26 @@ test('with an always-mode retry policy, the fallback is asked first', async (t) 
   assert.deepEqual(adapter.calls, ['main/m1', 'backup/b1'])
   assert.equal(turnEnds(agent).at(-1).kind, 'completed')
 })
+
+test('a user Stop while DSH waits to retry never switches models', async (t) => {
+  const slow = { ...FAST_RETRY, initialDelayMs: 2000, maxDelayMs: 2000 }
+  const { agent, adapter } = await host(t, { 'main/m1': 'SERVER' }, {
+    chain: [{ provider: 'backup', model: 'b1' }],
+  }, slow)
+  agent.followup(userMessage('hi'))
+  for (let i = 0; i < 100 && events(agent, 'llm/retry').length === 0; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  assert.equal(events(agent, 'llm/retry').length, 1)
+  agent.cancel({ kind: 'user' })
+  await agent.whenIdle()
+  await new Promise(resolve => setTimeout(resolve, 20))
+  assert.deepEqual(adapter.calls, ['main/m1'])
+  assert.equal(events(agent, 'model/selection').length, 0)
+  assert.equal(events(agent, 'user/message').filter(event => event.data.source.kind === NOTICE_KIND).length, 0)
+  const ends = turnEnds(agent)
+  assert.equal(ends.length, 1)
+  assert.equal(ends[0].kind, 'aborted')
+  assert.equal(ends[0].reason.kind, 'user')
+  assert.equal(agent.status, 'idle')
+})

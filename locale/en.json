@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Fallback models",
+    "description": "When a model request still fails after DSH's own retries (rate limit, server error, timeout, used-up quota, missing model), the work continues on the next model in your fallback list instead of ending the turn, and the conversation shows which model took over."
+  }
+}

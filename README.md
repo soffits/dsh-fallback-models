@@ -1,28 +1,28 @@
 # dsh-fallback-models
 
-A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that adds a fallback model chain. When a model request keeps failing after DSH's own retries, the work continues on the next model in your list instead of the turn ending with an error.
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that adds a fallback-model chain. When a model request still fails after DSH uses up its own retries, work continues using the next model you listed instead of ending the turn with an error.
 
-- An ordered list of fallback models (provider, model, optional reasoning effort), global and optionally per agent preset.
-- Runs after DSH's retry plugin (`@deepseek-ai/dsh-llm-retry`) has given up, and only for failures where another model can help.
-- Each model is tried at most once per failure, so it never loops.
-- By default the session goes back to its own model when the turn that needed the fallback ends.
-- The conversation shows a notice row such as `deepseek/deepseek-chat failed (RATE_LIMIT); switched to openrouter/qwen3`.
-- Edited on the plugin's settings page with model pickers, or in the profile config.
-- An empty list (the default) changes nothing.
+- An ordered list of fallback models (provider, model, and optionally reasoning effort), set globally and, if you like, per agent preset.
+- Kicks in after DSH's retry plugin (`@deepseek-ai/dsh-llm-retry`) runs out of attempts, and only when a different model could plausibly fix the failure.
+- For any one failure, each model gets at most one attempt, so loops cannot occur.
+- By default, once the turn needing the fallback ends, the session goes back to the model it started with.
+- The conversation shows a notice row, such as `deepseek/deepseek-chat failed (RATE_LIMIT); switched to openrouter/qwen3`.
+- You can change it through model pickers from the plugin's settings page or in the profile configuration.
+- An empty list, the default, leaves behavior unchanged.
 
-## Install
+## Installation
 
-Install it into a profile (here `web`) straight from GitHub:
+Install it straight from GitHub, adding it to a profile (`web` here):
 
 ```sh
 dsh plugin --profile web add github:soffits/dsh-fallback-models
 ```
 
-or from the Plugins page, or with the plugin manager (`install_bundle` with `github:soffits/dsh-fallback-models` or the path of a local clone). Then open **Plugins > dsh-fallback-models** and press **Configure** on the `fallback-models` row. Requires DSH 0.2.2-rc.1 or later within 0.2.x, and Node.js 22 or later.
+You can also use the Plugins page, or the plugin manager (`install_bundle` with `github:soffits/dsh-fallback-models` or a local clone's path). Then open **Plugins > dsh-fallback-models** and press **Configure** on the `fallback-models` row. Requirements are DSH 0.2.2-rc.1 or later in the 0.2.x series and Node.js 22 or later.
 
-## Configure
+## Configuration
 
-The settings page lists the models from DSH's model catalog (the same list as the composer's model picker), so you pick a provider, a model and, when the model has them, a reasoning effort. Rows can be reordered. The same values live on the plugin's row in the profile patch:
+The settings page lists models from DSH's catalog (the same set the model picker inside the composer shows), so you can pick a provider, choose a model, and set a reasoning effort when the model supports one. Rows can be reordered. The same values live inside the profile patch attached to the plugin's row:
 
 ```yaml
 - id: fallback-models
@@ -45,62 +45,65 @@ The settings page lists the models from DSH's model catalog (the same list as th
 
 | Field | Default | Meaning |
 |---|---|---|
-| `chain` | `[]` | Fallback models, tried in order. Empty turns the plugin off. |
-| `presets` | `{}` | Preset id mapped to its own list, used instead of `chain` for agents of that preset. An empty list turns fallback off for that preset. |
-| `scope` | `turn` | `turn`: go back to the session's own model when the turn that used the fallback ends. `session`: keep the fallback for the rest of the session. |
-| `codes` | see below | Failure codes that switch models. |
+| `chain` | `[]` | Fallback models tried in order. An empty value disables the plugin. |
+| `presets` | `{}` | Maps a preset id to a separate list that overrides `chain` for agents in that preset. An empty list turns fallback off for it. |
+| `scope` | `turn` | `turn`: switch back to the model the session started with when the fallback-using turn ends. `session`: keep the fallback until the session ends. |
+| `codes` | see below | Failure codes that cause a switch to another model. |
 
-All fields apply to the next failure without restarting DSH.
+All fields apply at the next failure; DSH does not need a restart.
 
-### Which failures switch
+### Failures that cause a switch
 
-DSH's adapters report each failed request with a provider-neutral code. These switch by default:
+DSH's adapters report every failed request with a code independent of the provider. By default, these codes cause a switch:
 
 | Code | Meaning |
 |---|---|
-| `RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE` | Overloaded, down, slow or broken connection. DSH retries these on the same model first. |
+| `RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE` | Service overload, outage, slowness, or a broken connection. DSH retries these before any model switch. |
 | `QUOTA`, `ACCOUNT_QUOTA` | Balance or quota used up. DSH does not retry these, so the switch is immediate. |
-| `UNKNOWN_MODEL`, `MODEL_UNSUPPORTED` | The model is gone or cannot take the request. |
+| `PI_AI_ERROR` | A provider error the pi-ai adapter failed to classify, for example a 404 for a withdrawn model. |
 
-These never switch by default, because changing models would hide a problem you probably want to fix: `AUTH`, `MISSING_CREDENTIAL`, `INVALID_CREDENTIAL` (credentials), `NO_ADAPTER` (provider not set up), `CONTEXT_WINDOW_EXCEEDED` (DSH's compaction handles it), `INVALID_REQUEST`. Add any of them to `codes`, or tick them on the settings page, if you want the switch anyway. A cancelled request (`ABORTED`, or a turn you stopped) never switches.
+`AUTH` (rejected credentials), `INVALID_REQUEST`, and `CONTEXT_WINDOW_EXCEEDED` (handled by DSH compaction) do not switch models by default, because a model change would hide a problem you probably need to fix. To allow it anyway, include them in `codes` or tick them via the settings page. Cancelled requests (`ABORTED`, or any turn you stopped) never switch.
+
+This plugin sees only failures reported by the model request. When DSH hits an error while it prepares a request (a model id that does not exist, or a missing API key), nothing is sent, the turn ends, and fallback does not happen.
 
 ## How it works
 
-DSH's agent loop offers one public place for model-request recovery: the `agent/request-error` waterfall (declared in `@deepseek-ai/dsh-agent`). `dsh-llm-retry` is a listener there, and when its budget is used up or the failure is not one it retries, it hands the failure to the next listener ("downstream recovery"). This plugin is that next listener. It calls `next()` first, so DSH's retry and any other recovery (context compaction, image offload) always get their turn, and it acts only when nobody asked for a retry.
+DSH's agent loop exposes one public route for recovering model requests: the `agent/request-error` waterfall (declared in `@deepseek-ai/dsh-agent`). `dsh-llm-retry` listens there; after its budget runs out, or when it does not retry that kind of failure, it hands the failure to the next listener ("downstream recovery"). This plugin is that next listener. Since it invokes `next()` first, DSH's retry and other recovery paths (context compaction, image offload) always get their turn, and it acts only when nothing asked for a retry.
 
-The model of a step is fixed before the step starts: a `retry` answer re-runs the same provider and model, and the 0.2.2 loop rejects a model change made in `agent/request`. DSH's documented way to change models is `agent.model.select()` before the next step. So the plugin:
+The model for a step is fixed before the step starts: a `retry` answer reruns that same provider/model, and the 0.2.2 loop forbids changing models inside `agent/request`. DSH's documented way to change models is calling `agent.model.select()` ahead of the next step. So the plugin does this:
 
-1. picks the next model in the list that has a registered provider and that DSH's LLM service accepts (`llm.resolveCallConfig`); unusable entries are skipped;
-2. records it as the session's next model with `agent.model.select()` (a `model/selection` session event; the saved default model is not touched);
-3. stops the failed turn with a plugin cancel (`{ kind: 'hook' }`, keeping queued messages), which records why on the turn's `turn/end` event;
-4. queues a short notice message, put ahead of anything you queued meanwhile, which starts the next turn on the fallback model.
+1. picks the next listed model with a registered provider that DSH's LLM service will accept (`llm.resolveCallConfig`), skipping unusable entries;
+2. makes it the model the session uses next through `agent.model.select()` (a `model/selection` session event; the stored default model stays as it was);
+3. closes the failed turn with a plugin cancel (`{ kind: 'hook' }`, keeping queued messages), recording the reason on that turn's `turn/end` event;
+4. queues a short notice message ahead of anything you queued meanwhile, and that message launches the following turn using the fallback model.
 
-The new turn sees the whole conversation, including your last message and any tool results, plus the plugin's notice (and, in Web UI sessions, DSH's own `[model changed: ...]` note), and carries on. If the fallback fails too, the same happens with the next model. When the list runs out, the turn ends with the original error. With `scope: turn`, the session's own model is selected again as soon as that continuation turn ends (unless you picked another model in the meantime).
+The new turn sees the whole conversation (your latest message, any tool results, the plugin's notice, and in the Web UI DSH's own `[model changed: ...]` note) and carries on. If the fallback fails too, the next model goes through the same process. When the list runs out, the turn ends with the original error. With `scope: turn`, the session's starting model is reselected as soon as that continuation turn ends (unless you picked another model in between).
 
 ### What you see
 
-- In the conversation, the notice row: `<old model> failed (<code>); switched to <new model>`. Expanding it shows the full text the model got.
-- The interrupted turn ends as stopped, with the reason `dsh-fallback-models: <old> failed (<code>); continuing on <new>` in the session log.
-- The composer's model picker shows the fallback model while it is in use.
-- Host log lines from `fallback-models` for every switch, skipped entry and restore.
+- A notice row shows in the conversation: `<old model> failed (<code>); switched to <new model>`. Expanding it reveals the full text the model got.
+- The turn that was interrupted is flagged as stopped, and the session log stores this reason: `dsh-fallback-models: <old> failed (<code>); continuing on <new>`.
+- While active, the fallback model appears in the composer picker.
+- Host log entries tagged `fallback-models` appear whenever a switch, skip, or restore happens.
 
-### What the model sees
+### What reaches the model
 
-One user-role notice per switch, for example:
+Each switch produces one user-role notice, for example:
 
 ```text
 [model fallback: the request to deepseek/deepseek-chat failed (RATE_LIMIT: Too many requests). Continuing on openrouter/qwen/qwen3-coder: resume the interrupted work where it stopped.]
 ```
 
-DSH starts a turn only when there is input, so this message is what starts the continuation, and it also tells the model why its reply restarts. Nothing else of the plugin reaches the model. The failed attempt itself stays out of the model's view, as with DSH's own retries.
+DSH starts a turn only when input arrives, so this message starts the continuation; it also tells the model why its reply is starting over. The model sees nothing else from the plugin. Just like DSH's own retries, the failed attempt stays invisible to the model.
 
-## Limits
+## Constraints
 
-- **A switch costs one turn boundary.** The failed turn shows as stopped and a new turn begins. DSH has no public way to change the model inside a running step, so this is the closest honest option.
-- **Goals pause.** If the failure happens during an automatic goal round, DSH's goal driver sees the stopped turn and pauses the goal; the work itself continues, and you resume the goal afterwards.
-- **Always-mode retry.** With a provider `retryPolicy` of `mode: always`, DSH asks downstream recovery first, so the switch happens on the first failure, without same-model retries. Once the list is used up, always mode retries the last model forever, as configured.
-- **Restarts.** The chain state (which models were tried, what to go back to) is kept in memory. If DSH restarts while a fallback is in use, the session stays on the fallback model until you change it.
-- **Billing.** Each fallback request is a new, billed request to that provider, and the continuation re-sends the conversation.
+- **Each switch uses up a turn boundary.** The failed turn looks stopped and a fresh turn begins. DSH offers no public way to swap models inside an active step, so this is the closest available method.
+- **Goals stop.** If a failure happens during a goal's automatic round, DSH's goal driver notices the stopped turn and turns the goal off; work continues, and you can restart the goal later.
+- **Always-mode retries.** With a provider `retryPolicy` of `mode: always`, DSH asks downstream recovery first, so the switch happens on the first failure without retrying the same model. When the chain is exhausted, always mode will keep retrying that last model forever, per configuration.
+- **Restarts.** Chain state (which models were tried and which model to return to) lives in memory. If DSH restarts with a fallback active, the session keeps using that fallback model unless you change it.
+- **Code that waits for "the turn" a prompt starts.** Such code first runs into the stopped turn. To get the final answer, keep reading past a `turn/end` whose reason is `{ kind: 'aborted', reason: { kind: 'hook', reason: 'dsh-fallback-models: ...' } }`; the continuation arrives in the following turn.
+- **Billing.** Each fallback request is billed separately by its provider, and the continuation sends the conversation again.
 
 ## Development
 
@@ -110,7 +113,7 @@ npm run check
 npm test
 ```
 
-`test/loop.test.js` runs the plugin inside DSH's real agent loop, LLM service, session store and `dsh-llm-retry`, with an in-process adapter whose models fail on demand. `test/client.test.js` loads the settings page the way DSH's module loader does and renders it.
+`test/loop.test.js` runs the plugin inside DSH's real agent loop, session store, LLM service, and `dsh-llm-retry`, with an in-process adapter whose models fail on request. `test/client.test.js` pulls in the settings page the way DSH's module loader does and renders it.
 
 ## License
 

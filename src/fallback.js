@@ -166,6 +166,8 @@ export function installFallback(ctx, config) {
     } catch (error) {
       logger.error('could not switch %s to %s: %s', routeLabel(failed), routeLabel(target),
         error instanceof Error ? error.message : String(error))
+      // No continuation will run, so let this turn's end restore the model.
+      state.turn = turn - 1
       return downstream
     }
     logger.warn('%s failed (%s); switched to %s', routeLabel(failed), failureText(failure), routeLabel(target))

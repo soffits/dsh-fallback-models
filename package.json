@@ -1,0 +1,84 @@
+{
+  "name": "dsh-fallback-models",
+  "version": "0.1.0",
+  "description": "Fallback model chain for DeepSeek Harness: when a model request keeps failing after DSH's own retries, the work continues on the next model in a configured list.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "src/*.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "check": "for f in index.js client.js src/*.js test/*.js; do node --check \"$f\" || exit 1; done"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "llm",
+    "fallback",
+    "failover"
+  ],
+  "author": "Sakina",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/soffits/dsh-fallback-models.git"
+  },
+  "homepage": "https://github.com/soffits/dsh-fallback-models#readme",
+  "bugs": {
+    "url": "https://github.com/soffits/dsh-fallback-models/issues"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-agent-loop": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-agent-loop-testkit": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-brand": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-fs-local": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm-retry": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-projection": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-timeout": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-working-directory": "0.2.2-rc.1"
+  }
+}

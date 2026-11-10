@@ -23,7 +23,16 @@ export const DEFAULT_CODES = Object.freeze([
   'QUOTA',
   'ACCOUNT_QUOTA',
   'PI_AI_ERROR',
+  'REFUSAL',
 ])
+
+/**
+ * The plugin's own code for a refused or filter-blocked answer. A refusal
+ * arrives as an ordinary successful response, so no adapter reports it; the
+ * plugin's `llm/stream` listener turns a detected one into a failure with
+ * this code (see src/refusal.js).
+ */
+export const REFUSAL_CODE = 'REFUSAL'
 
 /**
  * Codes that never switch, whatever the config says: a cancelled request is
@@ -110,6 +119,11 @@ export function failureText(failure) {
   const message = String(failure.message ?? '').replace(/\s+/g, ' ').trim()
   const short = message.length > 160 ? `${message.slice(0, 159)}…` : message
   return short ? `${failure.code}: ${short}` : String(failure.code)
+}
+
+/** Whether a failure is a refused answer rather than a failed request. */
+export function isRefusal(failure) {
+  return failure?.code === REFUSAL_CODE
 }
 
 /** Bound a one-line UI summary to DSH's notice limit (120 characters). */

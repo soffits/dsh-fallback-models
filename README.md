@@ -4,9 +4,10 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 
 - An ordered list of fallback models (provider, model, and optionally reasoning effort), set globally and, if you like, per agent preset.
 - Kicks in after DSH's retry plugin (`@deepseek-ai/dsh-llm-retry`) runs out of attempts, and only when a different model could plausibly fix the failure.
+- Also kicks in when a model refuses to answer or a provider's content filter blocks the reply, which DSH otherwise treats as a normal answer.
 - For any one failure, each model gets at most one attempt, so loops cannot occur.
 - By default, once the turn needing the fallback ends, the session goes back to the model it started with.
-- The conversation shows a notice row, such as `deepseek/deepseek-chat failed (RATE_LIMIT); switched to openrouter/qwen3`.
+- Every switch shows a banner in the conversation, such as **Model switched: deepseek/deepseek-chat failed**, and can also be sent to another plugin's message service (a Telegram topic, for example).
 - You can change it through model pickers from the plugin's settings page or in the profile configuration.
 - An empty list, the default, leaves behavior unchanged.
 
@@ -41,6 +42,10 @@ The settings page lists models from DSH's catalog (the same set the model picker
       quick: []            # no fallback for this preset
     scope: turn            # or: session
     # codes: [...]         # optional, see below
+    # refusalPatterns: [...]   # optional, see "Refused answers"
+    notify:                # optional, see "Notifications"
+      via: telegramTopics
+      to: "196554"
 ```
 
 | Field | Default | Meaning |
@@ -49,6 +54,9 @@ The settings page lists models from DSH's catalog (the same set the model picker
 | `presets` | `{}` | Maps a preset id to a separate list that overrides `chain` for agents in that preset. An empty list turns fallback off for it. |
 | `scope` | `turn` | `turn`: switch back to the model the session started with when the fallback-using turn ends. `session`: keep the fallback until the session ends. |
 | `codes` | see below | Failure codes that cause a switch to another model. |
+| `refusalPatterns` | built-in list | Regular expressions that mark a reply as refused. An empty list turns refusal detection off. |
+| `refusalMaxLength` | `500` | Longest reply, in characters, that can count as a refusal. |
+| `notify` | none | `{ via, to }`: a DSH service with a `send({ to, text, files, from })` method, and the address to pass it. |
 
 All fields apply at the next failure; DSH does not need a restart.
 
@@ -61,8 +69,20 @@ DSH's adapters report every failed request with a code independent of the provid
 | `RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE` | Service overload, outage, slowness, or a broken connection. DSH retries these before any model switch. |
 | `QUOTA`, `ACCOUNT_QUOTA` | Balance or quota used up. DSH does not retry these, so the switch is immediate. |
 | `PI_AI_ERROR` | A provider error the pi-ai adapter failed to classify, for example a 404 for a withdrawn model. |
+| `REFUSAL` | The model refused to answer, or a content filter blocked the reply. This plugin's own code; see below. |
 
 `AUTH` (rejected credentials), `INVALID_REQUEST`, and `CONTEXT_WINDOW_EXCEEDED` (handled by DSH compaction) do not switch models by default, because a model change would hide a problem you probably need to fix. To allow it anyway, include them in `codes` or tick them via the settings page. Cancelled requests (`ABORTED`, or any turn you stopped) never switch.
+
+### Refused answers
+
+A refusal arrives as an ordinary successful reply, so DSH reports no failure for it. The plugin watches each conversation request's stream and, when the reply finishes, treats it as a `REFUSAL` failure only if all of these hold:
+
+- one of `refusalPatterns` matches within the first 160 characters, and not right after a quotation mark. The built-in list covers filter notices ("This request was blocked by ... filters") and the usual opening refusals ("I can't help with that", "I'm not able to assist", "I won't help with", 我不能协助, 我无法帮助 and similar);
+- the reply is at most `refusalMaxLength` characters and calls no tools;
+- no tool call succeeded since your last message;
+- the chain still has an untried, usable model.
+
+Then DSH records the reply as a failed attempt, which is kept in the session log but is not shown as the answer and is not sent to any model, and the switch works as it does for an error. The refused text can flash briefly while it streams. When none of these hold, the reply stays the answer, and when every model refuses, the last refusal is the answer. A reply that only quotes or discusses a refusal, or a long answer that happens to say "I can't help with that part", is left alone. Remove `REFUSAL` from `codes` to keep refusals as answers.
 
 This plugin sees only failures reported by the model request. When DSH hits an error while it prepares a request (a model id that does not exist, or a missing API key), nothing is sent, the turn ends, and fallback does not happen.
 
@@ -81,10 +101,17 @@ The new turn sees the whole conversation (your latest message, any tool results,
 
 ### What you see
 
-- A notice row shows in the conversation: `<old model> failed (<code>); switched to <new model>`. Expanding it reveals the full text the model got.
+- A banner at the end of the interrupted turn: **Model switched: `<old>` failed** with the code and the model taking over, or for a refusal **Model switched: `<old>` refused to answer**, saying the reply was hidden. The continuation turn below it starts with DSH's collapsed "Execution requested" card, which holds the text the model got.
 - The turn that was interrupted is flagged as stopped, and the session log stores this reason: `dsh-fallback-models: <old> failed (<code>); continuing on <new>`.
 - While active, the fallback model appears in the composer picker.
 - Host log entries tagged `fallback-models` appear whenever a switch, skip, or restore happens.
+
+### Notifications
+
+The plugin depends on no other plugin. Each switch is also:
+
+- emitted as the Host event `fallback-models/switch`, with `{ agent, sessionId, turn, from, to, failure, refusal }`, for any plugin that wants to listen;
+- sent through `notify`, when set: the plugin looks up the service named by `via` at the time of the switch and calls its `send({ to, text, files: [], from: { label: 'dsh-fallback-models', sessionId } })` with one short message (worded apart for a refusal). Any plugin that provides such a service can receive these messages, for example a Telegram plugin's topic service with a topic's thread id as `to`. A missing service or a failed send is logged and changes nothing else.
 
 ### What reaches the model
 
@@ -93,6 +120,8 @@ Each switch produces one user-role notice, for example:
 ```text
 [model fallback: the request to deepseek/deepseek-chat failed (RATE_LIMIT: Too many requests). Continuing on openrouter/qwen/qwen3-coder: resume the interrupted work where it stopped.]
 ```
+
+After a refusal it reads `[model fallback: the reply from <old> could not be used. Continuing on <new>: answer the latest request.]`, without the refused text, so the new model answers the request instead of weighing another model's refusal.
 
 DSH starts a turn only when input arrives, so this message starts the continuation; it also tells the model why its reply is starting over. The model sees nothing else from the plugin. Just like DSH's own retries, the failed attempt stays invisible to the model.
 
@@ -113,7 +142,7 @@ npm run check
 npm test
 ```
 
-`test/loop.test.js` runs the plugin inside DSH's real agent loop, session store, LLM service, and `dsh-llm-retry`, with an in-process adapter whose models fail on request. `test/client.test.js` pulls in the settings page the way DSH's module loader does and renders it.
+`test/loop.test.js` runs the plugin inside DSH's real agent loop, session store, LLM service, and `dsh-llm-retry`, with an in-process adapter whose models fail or refuse on request. `test/refusal.test.js` covers refusal detection. `test/client.test.js` pulls in the settings page and the switch banner the way DSH's module loader does and renders them.
 
 ## License
 

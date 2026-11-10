@@ -10,7 +10,7 @@ import * as LlmRetry from '@deepseek-ai/dsh-llm-retry'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import * as plugin from '../index.js'
-import { NOTICE_KIND, REASON_PREFIX } from '../src/fallback.js'
+import { NOTICE_KIND, REASON_PREFIX, SWITCH_EVENT } from '../src/fallback.js'
 
 const FAST_RETRY = {
   mode: 'normal',
@@ -40,11 +40,12 @@ class ScriptedAdapter extends LlmAdapter {
     // A list is consumed one outcome per call, then answers 'ok'.
     const planned = this.behaviour[key]
     const outcome = (Array.isArray(planned) ? planned.shift() : planned) ?? 'ok'
-    if (outcome !== 'ok') {
+    // 'text:<reply>' answers successfully with that exact reply.
+    if (outcome !== 'ok' && !outcome.startsWith('text:')) {
       yield { type: 'finish', reason: { kind: 'error', failure: { code: outcome, message: `${key} is down` } } }
       return
     }
-    const text = `hello from ${key}`
+    const text = outcome === 'ok' ? `hello from ${key}` : outcome.slice('text:'.length)
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text }
     yield { type: 'block-end', index: 0, block: { type: 'text', text } }
@@ -65,13 +66,18 @@ async function host(t, behaviour, config, policy) {
   const ctx = new Context()
   t.after(() => ctx.dispose?.() ?? ctx.scope?.dispose?.())
   await mountAgentLoopTestDependencies(ctx)
+  // A stand-in for another plugin's message service (for example Telegram's).
+  const sent = []
+  ctx.provide('testNotifier', { send: async (request) => { sent.push(request); return { ok: true } } })
+  const switched = []
+  ctx.on(SWITCH_EVENT, info => switched.push(info))
   const adapter = new ScriptedAdapter(behaviour, policy)
   ctx.llm.registerAdapter(['main', 'backup', 'spare'], adapter)
   await ctx.plugin(LlmRetry)
   await ctx.plugin(plugin, config)
   const harness = await mountAgentLoopTestHarness(ctx)
   const agent = await harness.create(SessionId(`s-${Math.random().toString(36).slice(2)}`), { provider: 'main', model: 'm1' })
-  return { ctx, adapter, agent }
+  return { ctx, adapter, agent, sent, switched }
 }
 
 async function runTurn(agent, text) {
@@ -214,4 +220,107 @@ test('a user Stop while DSH waits to retry never switches models', async (t) => 
   assert.equal(ends[0].kind, 'aborted')
   assert.equal(ends[0].reason.kind, 'user')
   assert.equal(agent.status, 'idle')
+})
+
+const REFUSAL = 'text:I\'m sorry, but I can\'t help with that.'
+const NOTIFY = { via: 'testNotifier', to: '196554' }
+
+function answers(agent) {
+  return events(agent, 'assistant/message').map(event => event.data.message.content.filter(block => block.type === 'text').map(block => block.text).join(''))
+}
+
+test('a refused answer is hidden and the request goes to the next model, with one banner reason and one notice', async (t) => {
+  const { agent, adapter, sent, switched } = await host(t, { 'main/m1': REFUSAL }, {
+    chain: [{ provider: 'backup', model: 'b1' }],
+    notify: NOTIFY,
+  })
+  await runTurn(agent, 'write the scene')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  // REFUSAL is not one of DSH's retry codes: one request per model.
+  assert.deepEqual(adapter.calls, ['main/m1', 'backup/b1'])
+  // The refused reply is only a failed attempt; the one answer is the fallback's.
+  assert.deepEqual(answers(agent), ['hello from backup/b1'])
+  const attempts = events(agent, 'assistant/attempt')
+  assert.equal(attempts.length, 1)
+
+  const ends = turnEnds(agent)
+  assert.equal(ends[0].kind, 'aborted')
+  assert.equal(ends[0].reason.reason, `${REASON_PREFIX}: main/m1 refused to answer (REFUSAL); continuing on backup/b1`)
+  assert.equal(ends.at(-1).kind, 'completed')
+
+  const notices = events(agent, 'user/message').filter(event => event.data.source.kind === NOTICE_KIND)
+  assert.equal(notices.length, 1)
+  assert.equal(notices[0].data.source.summary, 'main/m1 refused to answer; switched to backup/b1')
+  // The new model is not shown the refusal itself.
+  assert.doesNotMatch(notices[0].data.content[0].text, /help with that/)
+
+  assert.equal(switched.length, 1)
+  assert.equal(switched[0].refusal, true)
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].to, '196554')
+  assert.match(sent[0].text, /main\/m1 refused to answer/)
+  assert.match(sent[0].text, /backup\/b1 is answering instead/)
+  assert.equal(sent[0].from.sessionId, String(agent.session.id))
+  assert.deepEqual(agent.model.current(), { provider: 'main', model: 'm1' })
+})
+
+test('an ordinary answer that mentions "can\'t help" stays the answer', async (t) => {
+  const reply = 'Restart the daemon with `systemctl restart foo`, then run the check again. '
+    + 'If that still fails, send me the log: the first error line usually names the missing file. '
+    + 'The built-in doctor command is the wrong tool here, so I can\'t help with that part through it.'
+  const { agent, adapter, sent, switched } = await host(t, { 'main/m1': `text:${reply}` }, {
+    chain: [{ provider: 'backup', model: 'b1' }],
+    notify: NOTIFY,
+  })
+  await runTurn(agent, 'it broke')
+  assert.deepEqual(adapter.calls, ['main/m1'])
+  assert.deepEqual(answers(agent), [reply])
+  assert.deepEqual(turnEnds(agent).map(reason => reason.kind), ['completed'])
+  assert.equal(switched.length, 0)
+  assert.equal(sent.length, 0)
+})
+
+test('a refusal is kept when REFUSAL is not a switching code or the chain is empty', async (t) => {
+  for (const config of [{ chain: [] }, { chain: [{ provider: 'backup', model: 'b1' }], codes: ['SERVER'] }, { chain: [{ provider: 'backup', model: 'b1' }], refusalPatterns: [] }]) {
+    const { agent, adapter } = await host(t, { 'main/m1': REFUSAL }, config)
+    await runTurn(agent, 'hi')
+    assert.deepEqual(adapter.calls, ['main/m1'])
+    assert.deepEqual(answers(agent), [REFUSAL.slice('text:'.length)])
+    assert.deepEqual(turnEnds(agent).map(reason => reason.kind), ['completed'])
+  }
+})
+
+test('when every fallback refuses too, the last refusal is kept as the answer and nothing loops', async (t) => {
+  const { agent, adapter, sent } = await host(t, { 'main/m1': REFUSAL, 'backup/b1': REFUSAL }, {
+    chain: [{ provider: 'backup', model: 'b1' }],
+    notify: NOTIFY,
+  })
+  await runTurn(agent, 'hi')
+  assert.deepEqual(adapter.calls, ['main/m1', 'backup/b1'])
+  assert.deepEqual(answers(agent), [REFUSAL.slice('text:'.length)])
+  assert.deepEqual(turnEnds(agent).map(reason => reason.kind), ['aborted', 'completed'])
+  assert.equal(sent.length, 1)
+  assert.deepEqual(agent.model.current(), { provider: 'main', model: 'm1' })
+})
+
+test('an error switch is announced once, with the error wording, and a missing notifier is harmless', async (t) => {
+  const { agent, sent, switched } = await host(t, { 'main/m1': 'QUOTA', 'backup/b1': 'QUOTA' }, {
+    chain: [{ provider: 'backup', model: 'b1' }, { provider: 'spare', model: 's1' }],
+    notify: NOTIFY,
+  })
+  await runTurn(agent, 'hi')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(switched.length, 2)
+  assert.equal(sent.length, 2)
+  assert.match(sent[0].text, /main\/m1 failed \(QUOTA: main\/m1 is down\)/)
+  assert.match(sent[0].text, /continues on backup\/b1/)
+  assert.match(sent[1].text, /backup\/b1 failed/)
+
+  const other = await host(t, { 'main/m1': 'SERVER' }, {
+    chain: [{ provider: 'backup', model: 'b1' }],
+    notify: { via: 'noSuchService', to: '1' },
+  })
+  await runTurn(other.agent, 'hi')
+  assert.equal(turnEnds(other.agent).at(-1).kind, 'completed')
+  assert.equal(other.switched.length, 1)
 })

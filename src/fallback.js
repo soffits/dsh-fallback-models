@@ -10,17 +10,58 @@
 // that starts the next turn on the fallback. The cancel avoids the error path,
 // so a subagent's parent or the session list does not see a failed turn that
 // is in fact continuing.
+//
+// A refused or filter-blocked answer is a successful response to DSH. The
+// plugin's `llm/stream` listener (src/refusal.js) turns one into a REFUSAL
+// failure, so it reaches the same recovery point as any other failure.
+//
+// Each switch is announced three ways, none of which needs another plugin:
+// a banner in the Web UI conversation (client.js renders the interrupted
+// turn's end), a `fallback-models/switch` event other plugins may listen to,
+// and, when `notify` names a service, one `send({ to, text, from })` call to
+// it (for example a Telegram plugin's topic service).
 import { randomUUID } from 'node:crypto'
 import {
-  boundSummary, candidates, chainFor, failureText, read, routeKey, routeLabel,
-  sameRoute, switches, toSelection,
+  REFUSAL_CODE, boundSummary, candidates, chainFor, failureText, isRefusal, read,
+  routeKey, routeLabel, sameRoute, switches, toSelection,
 } from './policy.js'
+import {
+  DEFAULT_REFUSAL_MAX_LENGTH, DEFAULT_REFUSAL_PATTERNS, compilePatterns,
+  toolSucceededThisTurn, watchRefusal,
+} from './refusal.js'
 
 /** User-message source kind of the continuation notice. */
 export const NOTICE_KIND = 'model-fallback'
 
 /** Prefix of the cancel reason recorded on the interrupted turn's turn/end. */
 export const REASON_PREFIX = 'dsh-fallback-models'
+
+/** Event emitted once per switch: `(payload: SwitchInfo) => void`. */
+export const SWITCH_EVENT = 'fallback-models/switch'
+
+/**
+ * The cancel reason of an interrupted turn. client.js parses this exact form
+ * to draw the banner, so keep the two in step.
+ */
+export function switchReason(from, to, failure) {
+  const what = isRefusal(failure) ? 'refused to answer' : 'failed'
+  return `${REASON_PREFIX}: ${routeLabel(from)} ${what} (${failure.code}); continuing on ${routeLabel(to)}`
+}
+
+/**
+ * The message sent through `notify` for one switch. A refusal is worded
+ * apart: the reply was hidden, not lost to an error.
+ */
+export function switchText(info) {
+  const from = routeLabel(info.from)
+  const to = routeLabel(info.to)
+  if (info.refusal) {
+    return `Model fallback: ${from} refused to answer or its filter blocked the reply, in session ${info.sessionId}. `
+      + `The refused reply was hidden, and ${to} is answering instead.`
+  }
+  return `Model fallback: ${from} failed (${failureText(info.failure)}) in session ${info.sessionId}. `
+    + `The work continues on ${to}.`
+}
 
 function freeze(value) {
   if (value && typeof value === 'object') {
@@ -37,19 +78,21 @@ function freeze(value) {
  * row with the summary.
  */
 export function noticeMessage(from, to, failure) {
+  // The refusal wording stays neutral and omits the refused text: the new
+  // model should answer the request, not weigh another model's refusal.
+  const text = isRefusal(failure)
+    ? `[model fallback: the reply from ${routeLabel(from)} could not be used. `
+      + `Continuing on ${routeLabel(to)}: answer the latest request.]`
+    : `[model fallback: the request to ${routeLabel(from)} failed (${failureText(failure)}). `
+      + `Continuing on ${routeLabel(to)}: resume the interrupted work where it stopped.]`
+  const summary = isRefusal(failure)
+    ? `${routeLabel(from)} refused to answer; switched to ${routeLabel(to)}`
+    : `${routeLabel(from)} failed (${failure.code}); switched to ${routeLabel(to)}`
   return freeze({
     id: randomUUID(),
     role: 'user',
-    content: [{
-      type: 'text',
-      text: `[model fallback: the request to ${routeLabel(from)} failed (${failureText(failure)}). `
-        + `Continuing on ${routeLabel(to)}: resume the interrupted work where it stopped.]`,
-    }],
-    source: {
-      kind: NOTICE_KIND,
-      form: 'notice',
-      summary: boundSummary(`${routeLabel(from)} failed (${failure.code}); switched to ${routeLabel(to)}`),
-    },
+    content: [{ type: 'text', text }],
+    source: { kind: NOTICE_KIND, form: 'notice', summary: boundSummary(summary) },
   })
 }
 
@@ -83,7 +126,23 @@ export function installFallback(ctx, config) {
       presets: read(config.presets) ?? {},
       codes: read(config.codes),
       scope: read(config.scope) ?? 'turn',
+      refusalPatterns: read(config.refusalPatterns) ?? DEFAULT_REFUSAL_PATTERNS,
+      refusalMaxLength: read(config.refusalMaxLength) ?? DEFAULT_REFUSAL_MAX_LENGTH,
+      notify: read(config.notify),
     }
+  }
+
+  // Compiled refusal patterns, rebuilt when the configured list changes.
+  let compiled = { key: undefined, patterns: [] }
+  function patterns(sources) {
+    const key = JSON.stringify(sources)
+    if (compiled.key !== key) {
+      compiled = {
+        key,
+        patterns: compilePatterns(sources, (source, message) => logger.warn('ignoring refusal pattern %s: %s', source, message)),
+      }
+    }
+    return compiled.patterns
   }
 
   function presetOf(agent) {
@@ -153,7 +212,7 @@ export function installFallback(ctx, config) {
     state.target = target
     state.turn = turn
     chains.set(session, state)
-    const reason = `${REASON_PREFIX}: ${routeLabel(failed)} failed (${failure.code}); continuing on ${routeLabel(target)}`
+    const reason = switchReason(failed, target, failure)
     try {
       agent.model.select(target)
       agent.cancel({ kind: 'hook', reason }, { keepInbox: true })
@@ -171,8 +230,86 @@ export function installFallback(ctx, config) {
       return downstream
     }
     logger.warn('%s failed (%s); switched to %s', routeLabel(failed), failureText(failure), routeLabel(target))
+    announce({
+      agent,
+      sessionId: String(session.id),
+      turn,
+      from: failed,
+      to: target,
+      failure,
+      refusal: isRefusal(failure),
+    }, current.notify)
     return undefined
   }
+
+  /** Tell listeners and the configured notifier about one switch. */
+  function announce(info, notify) {
+    try {
+      ctx.emit(SWITCH_EVENT, info)
+    } catch (error) {
+      logger.warn('a %s listener failed: %s', SWITCH_EVENT, error instanceof Error ? error.message : String(error))
+    }
+    const via = typeof notify?.via === 'string' ? notify.via.trim() : ''
+    if (via === '') return
+    let service
+    try {
+      service = ctx.get(via)
+    } catch {
+      service = undefined
+    }
+    if (typeof service?.send !== 'function') {
+      logger.warn('notify: no running service %s with a send method', via)
+      return
+    }
+    const request = {
+      to: typeof notify.to === 'string' ? notify.to.trim() : notify.to,
+      text: switchText(info),
+      files: [],
+      from: { label: 'dsh-fallback-models', sessionId: info.sessionId },
+    }
+    Promise.resolve()
+      .then(() => service.send(request))
+      .catch(error => logger.warn('notify through %s failed: %s', via, error instanceof Error ? error.message : String(error)))
+  }
+
+  /**
+   * Whether a refusal of this request should become a REFUSAL failure: the
+   * code switches, the agent's chain has a model that is not used up, and no
+   * tool call succeeded in this turn. Otherwise the reply stays the answer.
+   */
+  async function refusalSwitches(options, current, signal) {
+    if (disposed || signal?.aborted || !switches(current.codes, REFUSAL_CODE)) return false
+    if (toolSucceededThisTurn(options.messages)) return false
+    let agent
+    try {
+      agent = ctx.get('agents')?.get(options.sessionId)
+    } catch {
+      agent = undefined
+    }
+    if (!agent) return false
+    const chain = chainFor(current, presetOf(agent))
+    if (chain.length === 0) return false
+    const failed = { provider: options.provider, model: options.model }
+    const tried = new Set(chains.get(agent.session)?.tried ?? [])
+    tried.add(routeKey(failed))
+    const target = await pick(candidates(chain, failed, tried), tried, signal ?? new AbortController().signal)
+    return target !== undefined
+  }
+
+  // Watch only conversation requests the agent loop builds: they carry the
+  // session id and no auxiliary purpose (titles, summaries and the like do).
+  ctx.on('llm/stream', (options, next) => {
+    const current = settings()
+    const list = patterns(current.refusalPatterns)
+    if (disposed || list.length === 0 || options?.sessionId === undefined || options.purpose !== undefined
+      || !switches(current.codes, REFUSAL_CODE) || chainFor(current, undefined).length === 0 && Object.keys(current.presets).length === 0) {
+      return next()
+    }
+    return watchRefusal(next(), () => refusalSwitches(options, settings(), options.signal), {
+      patterns: list,
+      maxLength: current.refusalMaxLength,
+    })
+  })
 
   ctx.on('agent/request-error', recover)
 

@@ -8,6 +8,11 @@
  * (DSH's settings service writes the profile config); the model pickers list
  * DSH's own model catalog (`remote.session.modelCatalog`, the list the
  * composer's model picker shows). Styles use only host theme tokens (--dsw-*).
+ *
+ * It also draws a banner in the conversation wherever the plugin switched
+ * models: a Conversation Definition (uiConversation.events) turns the
+ * interrupted turn's `turn/end` into a Chat Node, and a keyed
+ * `conversation.chat.node` renderer draws it.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-fallback-models',
@@ -21,9 +26,14 @@ window.__ModuleLoader__.load({
     const STYLE_ID = 'dsh-fallback-models'
 
     // Keep in step with src/policy.js DEFAULT_CODES.
-    const DEFAULT_CODES = ['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE', 'QUOTA', 'ACCOUNT_QUOTA', 'PI_AI_ERROR']
+    const DEFAULT_CODES = ['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE', 'QUOTA', 'ACCOUNT_QUOTA', 'PI_AI_ERROR', 'REFUSAL']
     // Codes a model stream can report that stay off by default.
     const OPTIONAL_CODES = ['AUTH', 'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED']
+    // Chat Node kind of the switch banner, and the cancel reason it reads.
+    // Keep REASON in step with src/fallback.js switchReason.
+    const NODE_KIND = 'dsh-fallback-models'
+    const REASON_PREFIX = 'dsh-fallback-models:'
+    const REASON = /^dsh-fallback-models: (\S+) (failed|refused to answer) \(([A-Za-z0-9_]+)\); continuing on (\S+)$/
 
     // ---------------------------------------------------------------- text
 
@@ -64,6 +74,12 @@ window.__ModuleLoader__.load({
       'code.QUOTA': 'Quota or balance used up',
       'code.ACCOUNT_QUOTA': 'Account quota used up',
       'code.PI_AI_ERROR': 'Other provider error (for example, model not found)',
+      'code.REFUSAL': 'Refused or filter-blocked answer',
+      'banner.error.title': 'Model switched: {from} failed',
+      'banner.error.body': 'The request failed ({code}). The work continues on {to}.',
+      'banner.refusal.title': 'Model switched: {from} refused to answer',
+      'banner.refusal.body': 'Its reply was a refusal or a content-filter block, so it was hidden. {to} is answering instead.',
+      'banner.other': 'Model switched: {reason}',
       'code.AUTH': 'Authentication failed',
       'code.CONTEXT_WINDOW_EXCEEDED': 'Context window exceeded',
       'code.INVALID_REQUEST': 'Request rejected as invalid',
@@ -115,6 +131,12 @@ window.__ModuleLoader__.load({
       'code.QUOTA': '额度或余额用完',
       'code.ACCOUNT_QUOTA': '账户额度用完',
       'code.PI_AI_ERROR': '其他提供方错误（例如找不到模型）',
+      'code.REFUSAL': '回答被拒绝或被过滤',
+      'banner.error.title': '已切换模型：{from} 失败',
+      'banner.error.body': '请求失败（{code}），改由 {to} 继续。',
+      'banner.refusal.title': '已切换模型：{from} 拒绝回答',
+      'banner.refusal.body': '它的回复是拒绝或被内容过滤拦下，已隐藏，改由 {to} 回答。',
+      'banner.other': '已切换模型：{reason}',
       'code.AUTH': '认证失败',
       'code.CONTEXT_WINDOW_EXCEEDED': '超出上下文窗口',
       'code.INVALID_REQUEST': '请求被判为无效',
@@ -151,6 +173,10 @@ window.__ModuleLoader__.load({
 .dfm-footer { display: flex; gap: 8px; align-items: center; }
 .dfm-error { color: var(--dsw-alias-state-error-primary); }
 .dfm-note { color: var(--dsw-alias-label-tertiary); }
+.dfm-banner { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; padding: 10px 14px; border: 1px solid var(--dsw-alias-state-warn-primary); border-left-width: 4px; border-radius: var(--dsw-radius-md); background: var(--dsw-alias-state-warn-tertiary); color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 1.5; }
+.dfm-banner-icon { flex: none; color: var(--dsw-alias-state-warn-primary); font-size: 16px; line-height: 21px; }
+.dfm-banner-title { font-weight: 600; color: var(--dsw-alias-state-warn-label); }
+.dfm-banner-body { color: var(--dsw-alias-label-secondary); }
 `
 
     // ---------------------------------------------------------------- data
@@ -384,10 +410,70 @@ window.__ModuleLoader__.load({
       return h(SettingsPage, { form, session, t })
     }
 
+    // ---------------------------------------------------------------- banner
+
+    /** Banner facts from the cancel reason the Host plugin records, or null. */
+    function parseReason(text) {
+      if (typeof text !== 'string' || !text.startsWith(REASON_PREFIX)) return null
+      const match = REASON.exec(text)
+      if (!match) return { raw: text.slice(REASON_PREFIX.length).trim() }
+      return { from: match[1], refusal: match[2] !== 'failed', code: match[3], to: match[4] }
+    }
+
+    function hookReason(event) {
+      if (event?.type !== 'turn/end') return undefined
+      const reason = event.data?.reason
+      if (reason?.kind !== 'aborted' || reason.reason?.kind !== 'hook') return undefined
+      const text = reason.reason.reason
+      return typeof text === 'string' && text.startsWith(REASON_PREFIX) ? text : undefined
+    }
+
+    /** One banner per turn the plugin interrupted, placed at that turn's end. */
+    const switchDefinition = {
+      kind: NODE_KIND,
+      target: 'chat',
+      match: (event) => (hookReason(event) === undefined ? null : { id: String(event.data.turn), role: 'start' }),
+      start: (_context, match) => ({
+        turn: match.event.data.turn,
+        seq: match.event.seq,
+        time: match.event.time,
+        ...parseReason(hookReason(match.event)),
+      }),
+      update: (context) => context.state,
+      buildViewNode: (context) => {
+        const state = context.state
+        if (state === undefined) return null
+        return {
+          key: context.key,
+          kind: NODE_KIND,
+          id: context.id,
+          target: 'chat',
+          anchorSeq: state.seq,
+          location: context.start?.location ?? context.matches[0]?.location ?? { kind: 'unresolved' },
+          visibility: 'visible',
+          groupTree: 'turn',
+          data: state,
+        }
+      },
+    }
+
+    function SwitchBanner({ node, t }) {
+      const data = node?.data ?? {}
+      const title = data.raw !== undefined
+        ? t('banner.other', { reason: data.raw })
+        : t(data.refusal ? 'banner.refusal.title' : 'banner.error.title', data)
+      const body = data.raw !== undefined ? null : t(data.refusal ? 'banner.refusal.body' : 'banner.error.body', data)
+      return h('div', { className: 'dfm-banner', role: 'status', 'data-model-fallback': data.refusal ? 'refusal' : 'error' },
+        h('span', { className: 'dfm-banner-icon', 'aria-hidden': true }, '⇄'),
+        h('div', null,
+          h('div', { className: 'dfm-banner-title' }, title),
+          body && h('div', { className: 'dfm-banner-body' }, body)))
+    }
+
     // ---------------------------------------------------------------- plugin
 
     return {
-      inject: ['slots', 'locale', 'remote', 'remote.session'],
+      inject: ['slots', 'locale', 'remote', 'remote.session', 'uiConversation'],
       apply(ctx) {
         ctx.effect(() => {
           const disposers = [ctx.locale.register(NS, 'en', en), ctx.locale.register(NS, 'zh', zh)]
@@ -404,6 +490,13 @@ window.__ModuleLoader__.load({
           document.head.appendChild(tag)
           return () => tag.remove()
         }, 'fallback-models: styles')
+
+        ctx.effect(() => ctx.uiConversation.events.register(switchDefinition), 'fallback-models: switch banner events')
+        ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+          name: 'conversation.chat.node',
+          key: NODE_KIND,
+          locale: NS,
+        }, SwitchBanner))
 
         const session = ctx.remote.session
         ctx.slots.inject('plugins.row.config', () => ctx.slots.register({

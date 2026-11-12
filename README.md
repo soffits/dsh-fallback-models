@@ -69,7 +69,7 @@ DSH's adapters report every failed request with a code independent of the provid
 | `RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`, `EMPTY_RESPONSE` | Service overload, outage, slowness, or a broken connection. DSH retries these before any model switch. |
 | `QUOTA`, `ACCOUNT_QUOTA` | Balance or quota used up. DSH does not retry these, so the switch is immediate. |
 | `PI_AI_ERROR` | A provider error the pi-ai adapter failed to classify, for example a 404 for a withdrawn model. |
-| `REFUSAL` | The model refused to answer, or a content filter blocked the reply. This plugin's own code; see below. |
+| `REFUSAL` | The model refused to answer, or a content filter blocked the reply. This plugin's own code, which an adapter may also report itself; see below. |
 
 `AUTH` (rejected credentials), `INVALID_REQUEST`, and `CONTEXT_WINDOW_EXCEEDED` (handled by DSH compaction) do not switch models by default, because a model change would hide a problem you probably need to fix. To allow it anyway, include them in `codes` or tick them via the settings page. Cancelled requests (`ABORTED`, or any turn you stopped) never switch.
 
@@ -83,6 +83,8 @@ A refusal arrives as an ordinary successful reply, so DSH reports no failure for
 - the chain still has an untried, usable model.
 
 Then DSH records the reply as a failed attempt, which is kept in the session log but is not shown as the answer and is not sent to any model, and the switch works as it does for an error. The refused text can flash briefly while it streams. When none of these hold, the reply stays the answer, and when every model refuses, the last refusal is the answer. A reply that only quotes or discusses a refusal, or a long answer that happens to say "I can't help with that part", is left alone. Remove `REFUSAL` from `codes` to keep refusals as answers.
+
+An adapter that knows a reply was refused can also end the request with a failure of code `REFUSAL` itself; [dsh-oh-my-claude](https://github.com/lcestou/dsh-oh-my-claude) does that for Claude Code with `refusalAsFailure: true`, including a reply a safety classifier stopped. Such a failure switches like any other code in `codes`: the patterns, the length limit and the tool-call rule above do not apply, since nothing has to be guessed.
 
 This plugin sees only failures reported by the model request. When DSH hits an error while it prepares a request (a model id that does not exist, or a missing API key), nothing is sent, the turn ends, and fallback does not happen.
 

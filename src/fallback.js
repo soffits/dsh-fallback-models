@@ -13,7 +13,8 @@
 //
 // A refused or filter-blocked answer is a successful response to DSH. The
 // plugin's `llm/stream` listener (src/refusal.js) turns one into a REFUSAL
-// failure, so it reaches the same recovery point as any other failure.
+// failure, so it reaches the same recovery point as any other failure. An
+// adapter may also end a refused request with code REFUSAL itself.
 //
 // Each switch is announced three ways, none of which needs another plugin:
 // a banner in the Web UI conversation (client.js renders the interrupted

@@ -18,7 +18,7 @@ export const Config = z.object({
   presets: z.dict(Chain).default({}).volatile()
     .description('Per agent preset: a preset id mapped to its own fallback list, used instead of the global one. An empty list turns fallback off for that preset.'),
   codes: z.array(z.string()).default([...DEFAULT_CODES]).volatile()
-    .description('Failure codes that switch to the next model (after DSH\'s own retries). ABORTED never switches. REFUSAL is the plugin\'s own code for a refused or filter-blocked answer (see refusalPatterns); leave it out to keep such answers. Add AUTH to also switch on rejected credentials. Errors raised before a request is sent (unknown model, missing credential) end the turn without reaching this plugin.'),
+    .description('Failure codes that switch to the next model (after DSH\'s own retries). ABORTED never switches. REFUSAL is the code for a refused or filter-blocked answer, detected by refusalPatterns or reported by an adapter itself; leave it out to keep such answers. Add AUTH to also switch on rejected credentials. Errors raised before a request is sent (unknown model, missing credential) end the turn without reaching this plugin.'),
   scope: z.union(['turn', 'session']).default('turn').volatile()
     .description('turn: go back to the session\'s own model when the turn that used the fallback ends. session: keep the fallback for the rest of the session.'),
   refusalPatterns: z.array(z.string()).default([...DEFAULT_REFUSAL_PATTERNS]).volatile()

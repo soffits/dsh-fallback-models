@@ -27,10 +27,12 @@ export const DEFAULT_CODES = Object.freeze([
 ])
 
 /**
- * The plugin's own code for a refused or filter-blocked answer. A refusal
- * arrives as an ordinary successful response, so no adapter reports it; the
- * plugin's `llm/stream` listener turns a detected one into a failure with
- * this code (see src/refusal.js).
+ * The code for a refused or filter-blocked answer. Most adapters deliver a
+ * refusal as an ordinary successful response, and the plugin's `llm/stream`
+ * listener turns a detected one into a failure with this code (see
+ * src/refusal.js). An adapter that knows a reply was refused may report the
+ * code itself (dsh-oh-my-claude's `refusalAsFailure`); that failure switches
+ * like any other.
  */
 export const REFUSAL_CODE = 'REFUSAL'
 

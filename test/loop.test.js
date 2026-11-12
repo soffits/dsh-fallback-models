@@ -264,6 +264,23 @@ test('a refused answer is hidden and the request goes to the next model, with on
   assert.deepEqual(agent.model.current(), { provider: 'main', model: 'm1' })
 })
 
+test('a refusal the adapter reports itself (code REFUSAL) switches the same way, without pattern matching', async (t) => {
+  // dsh-oh-my-claude's refusalAsFailure ends a refused Claude Code turn this way.
+  const { agent, adapter, switched } = await host(t, { 'main/m1': 'REFUSAL' }, {
+    chain: [{ provider: 'backup', model: 'b1' }],
+    refusalPatterns: [],
+  })
+  await runTurn(agent, 'write the scene')
+  assert.deepEqual(adapter.calls, ['main/m1', 'backup/b1'])
+  assert.deepEqual(answers(agent), ['hello from backup/b1'])
+  const ends = turnEnds(agent)
+  assert.equal(ends[0].reason.reason, `${REASON_PREFIX}: main/m1 refused to answer (REFUSAL); continuing on backup/b1`)
+  assert.equal(ends.at(-1).kind, 'completed')
+  assert.equal(switched.length, 1)
+  assert.equal(switched[0].refusal, true)
+  assert.deepEqual(agent.model.current(), { provider: 'main', model: 'm1' })
+})
+
 test('an ordinary answer that mentions "can\'t help" stays the answer', async (t) => {
   const reply = 'Restart the daemon with `systemctl restart foo`, then run the check again. '
     + 'If that still fails, send me the log: the first error line usually names the missing file. '

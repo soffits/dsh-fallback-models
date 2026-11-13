@@ -13,13 +13,13 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 
 ## Installation
 
-Install it straight from GitHub, adding it to a profile (`web` here):
+Install it from npm, adding it to a profile (`web` here):
 
 ```sh
-dsh plugin --profile web add github:soffits/dsh-fallback-models
+dsh plugin --profile web add @soffits/dsh-fallback-models
 ```
 
-You can also use the Plugins page, or the plugin manager (`install_bundle` with `github:soffits/dsh-fallback-models` or a local clone's path). Then open **Plugins > dsh-fallback-models** and press **Configure** on the `fallback-models` row. Requirements are DSH 0.2.2-rc.1 or later in the 0.2.x series and Node.js 22 or later.
+You can also use the Plugins page, or the plugin manager (`install_bundle` with `@soffits/dsh-fallback-models` or a local clone's path). Then open **Plugins > @soffits/dsh-fallback-models** and press **Configure** on the `fallback-models` row. Requirements are DSH 0.2.2-rc.1 or later in the 0.2.x series and Node.js 22 or later.
 
 ## Configuration
 
@@ -27,7 +27,7 @@ The settings page lists models from DSH's catalog (the same set the model picker
 
 ```yaml
 - id: fallback-models
-  name: 'dsh-fallback-models'
+  name: '@soffits/dsh-fallback-models'
   config:
     chain:
       - provider: deepseek

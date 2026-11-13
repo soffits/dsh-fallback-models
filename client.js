@@ -3,7 +3,7 @@
  *
  * Plain JavaScript in DSH's Client module format (no build step). React comes
  * from the page's module table. The page is a `plugins.row.config` entry, so
- * Plugins > dsh-fallback-models shows a Configure control on the plugin row.
+ * Plugins > @soffits/dsh-fallback-models shows a Configure control on the plugin row.
  * Values are read and saved through the `form` the Plugins page passes in
  * (DSH's settings service writes the profile config); the model pickers list
  * DSH's own model catalog (`remote.session.modelCatalog`, the list the
@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useMemo } = React
 
     const NS = 'dsh-fallback-models'
-    const KEY = 'dsh-fallback-models#fallback-models'
+    const KEY = '@soffits/dsh-fallback-models#fallback-models'
     const STYLE_ID = 'dsh-fallback-models'
 
     // Keep in step with src/policy.js DEFAULT_CODES.

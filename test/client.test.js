@@ -55,7 +55,7 @@ test('registers a Configure page for its own row and renders summary and page', 
   plugin.apply(ctx)
   const { options, component } = ctx.registrations.find(entry => entry.options.name === 'plugins.row.config')
   assert.equal(options.name, 'plugins.row.config')
-  assert.equal(options.key, 'dsh-fallback-models#fallback-models')
+  assert.equal(options.key, '@soffits/dsh-fallback-models#fallback-models')
   const props = options.inject()
 
   const value = {

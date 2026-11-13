@@ -1,8 +1,8 @@
 # Bundle layer for dsh-fallback-models. The chain is edited on the plugin's
-# settings page (Plugins > dsh-fallback-models > Configure) or here in the
+# settings page (Plugins > @soffits/dsh-fallback-models > Configure) or here in the
 # profile patch; an empty chain leaves model requests untouched.
 - insert:
     - id: fallback-models
-      name: 'dsh-fallback-models'
+      name: '@soffits/dsh-fallback-models'
       config:
         chain: []

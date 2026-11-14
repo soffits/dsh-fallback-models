@@ -15,7 +15,7 @@
  * `conversation.chat.node` renderer draws it.
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-fallback-models',
+  id: '@soffits/dsh-fallback-models',
   factory(require) {
     const React = require('react')
     const h = React.createElement

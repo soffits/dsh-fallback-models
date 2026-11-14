@@ -12,7 +12,7 @@ async function loadClient() {
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   new Function(source)()
   delete globalThis.window
-  assert.equal(entry.id, 'dsh-fallback-models')
+  assert.equal(entry.id, '@soffits/dsh-fallback-models')
   return entry.factory(name => {
     if (name === 'react') return React
     throw new Error(`unexpected module ${name}`)

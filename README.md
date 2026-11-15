@@ -44,8 +44,7 @@ The settings page lists models from DSH's catalog (the same set the model picker
     # codes: [...]         # optional, see below
     # refusalPatterns: [...]   # optional, see "Refused answers"
     notify:                # optional, see "Notifications"
-      via: telegramTopics
-      to: "196554"
+      via: telegramTopics  # to the conversation's own topic; add `to: "<thread id>"` for one fixed topic
 ```
 
 | Field | Default | Meaning |
@@ -56,7 +55,7 @@ The settings page lists models from DSH's catalog (the same set the model picker
 | `codes` | see below | Failure codes that cause a switch to another model. |
 | `refusalPatterns` | built-in list | Regular expressions that mark a reply as refused. An empty list turns refusal detection off. |
 | `refusalMaxLength` | `500` | Longest reply, in characters, that can count as a refusal. |
-| `notify` | none | `{ via, to }`: a DSH service with a `send({ to, text, files, from })` method, and the address to pass it. |
+| `notify` | none | `{ via, to }`: a DSH service with a `send({ to, chat, text, files, from })` method. Without `to`, each message goes to the conversation the switch happened in; with `to`, always to that address. See "Notifications". |
 
 All fields apply at the next failure; DSH does not need a restart.
 
@@ -113,7 +112,12 @@ The new turn sees the whole conversation (your latest message, any tool results,
 The plugin depends on no other plugin. Each switch is also:
 
 - emitted as the Host event `fallback-models/switch`, with `{ agent, sessionId, turn, from, to, failure, refusal }`, for any plugin that wants to listen;
-- sent through `notify`, when set: the plugin looks up the service named by `via` at the time of the switch and calls its `send({ to, text, files: [], from: { label: 'dsh-fallback-models', sessionId } })` with one short message (worded apart for a refusal). Any plugin that provides such a service can receive these messages, for example a Telegram plugin's topic service with a topic's thread id as `to`. A missing service or a failed send is logged and changes nothing else.
+- sent through `notify`, when `via` names a service: the plugin looks the service up at the time of the switch and calls its `send({ to, chat, text, files: [], from: { label: 'dsh-fallback-models', sessionId } })` with one short message (worded apart for a refusal). A missing service or a failed send is logged and changes nothing else.
+
+Where the message goes depends on `to`:
+
+- Empty (the default): to the conversation the switch happened in. The service has to say where conversations live through a `topics()` method that returns `[{ sessionId, threadId, chatId }]`, as the topic service of [dsh-telegram-bot](https://github.com/soffits/dsh-telegram-bot) (`telegramTopics`) does; the message goes to the entry bound to the session, with `to` set to its `threadId` and `chat` to its `chatId`. When a subagent's model is switched, the plugin follows the subagent's parents up to the nearest conversation that has an entry and sends there, saying it happened in a subagent. A conversation with no entry anywhere up its chain, such as one opened only in the Web UI, gets no message. Ordinary forks count as conversations of their own.
+- Set: every message goes to that one address, such as a topic's thread id, whatever conversation it came from.
 
 ### What reaches the model
 

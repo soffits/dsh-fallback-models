@@ -67,8 +67,13 @@ async function host(t, behaviour, config, policy) {
   t.after(() => ctx.dispose?.() ?? ctx.scope?.dispose?.())
   await mountAgentLoopTestDependencies(ctx)
   // A stand-in for another plugin's message service (for example Telegram's).
+  // `places` maps a session id to the thread id it is bound to, as topics() lists them.
   const sent = []
-  ctx.provide('testNotifier', { send: async (request) => { sent.push(request); return { ok: true } } })
+  const places = new Map()
+  ctx.provide('testNotifier', {
+    send: async (request) => { sent.push(request); return { ok: true } },
+    topics: () => [...places].map(([sessionId, threadId]) => ({ chatId: -1, threadId, name: null, sessionId })),
+  })
   const switched = []
   ctx.on(SWITCH_EVENT, info => switched.push(info))
   const adapter = new ScriptedAdapter(behaviour, policy)
@@ -77,7 +82,7 @@ async function host(t, behaviour, config, policy) {
   await ctx.plugin(plugin, config)
   const harness = await mountAgentLoopTestHarness(ctx)
   const agent = await harness.create(SessionId(`s-${Math.random().toString(36).slice(2)}`), { provider: 'main', model: 'm1' })
-  return { ctx, adapter, agent, sent, switched }
+  return { ctx, adapter, agent, harness, sent, switched, places }
 }
 
 async function runTurn(agent, text) {
@@ -340,4 +345,32 @@ test('an error switch is announced once, with the error wording, and a missing n
   await runTurn(other.agent, 'hi')
   assert.equal(turnEnds(other.agent).at(-1).kind, 'completed')
   assert.equal(other.switched.length, 1)
+})
+
+test('without notify.to, a subagent\'s switch is sent to the place of the conversation that started it', async (t) => {
+  const { adapter, agent: root, harness, sent, switched, places } = await host(t, {}, {
+    chain: [{ provider: 'backup', model: 'b1' }],
+    notify: { via: 'testNotifier' },
+  })
+  places.set(String(root.session.id), 196576)
+  const child = await harness.create(SessionId(`c-${Math.random().toString(36).slice(2)}`), { provider: 'main', model: 'm1' }, {
+    parentSession: root.session.id, origin: 'subagent', delegationDepth: 1,
+  })
+  adapter.behaviour['main/m1'] = 'QUOTA'
+  await runTurn(child, 'look into it')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(turnEnds(child).at(-1).kind, 'completed')
+  assert.equal(switched.length, 1)
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].to, '196576')
+  assert.equal(sent[0].chat, -1)
+  assert.match(sent[0].text, new RegExp(`in a subagent of this conversation \\(session ${child.session.id}\\)`))
+
+  // A conversation with no place anywhere gets no message.
+  places.clear()
+  adapter.behaviour['main/m1'] = 'QUOTA'
+  await runTurn(child, 'again')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(switched.length, 2)
+  assert.equal(sent.length, 1)
 })

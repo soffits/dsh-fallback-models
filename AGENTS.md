@@ -4,8 +4,8 @@ A DeepSeek Harness (DSH) plugin that continues a turn on the next model of a con
 
 ## Layout
 
-- `src/policy.js`: which failures may trigger a switch; `src/refusal.js`: refusal and content-filter detection; `src/fallback.js`: the switch and the restore of the session model; `src/config.js`: settings schema (global chain and per-preset chains); `client.js`: the settings page.
-- Tests are in `test/`; each file covers one of those layers.
+- `src/policy.js`: which failures may trigger a switch; `src/refusal.js`: refusal and content-filter detection; `src/fallback.js`: the switch and the restore of the session model; `src/notify.js`: the optional message per switch and where it goes; `src/config.js`: settings schema (global chain and per-preset chains); `client.js`: the settings page.
+- Tests are in `test/`; each file covers one of those layers. Implementation decisions: `docs/decisions.md`.
 
 ## Rules
 

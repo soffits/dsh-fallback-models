@@ -19,13 +19,14 @@
 // Each switch is announced three ways, none of which needs another plugin:
 // a banner in the Web UI conversation (client.js renders the interrupted
 // turn's end), a `fallback-models/switch` event other plugins may listen to,
-// and, when `notify` names a service, one `send({ to, text, from })` call to
-// it (for example a Telegram plugin's topic service).
+// and, when `notify` names a service, one message through it, to a fixed
+// address or to the conversation's own place (src/notify.js).
 import { randomUUID } from 'node:crypto'
 import {
   REFUSAL_CODE, boundSummary, candidates, chainFor, failureText, isRefusal, read,
   routeKey, routeLabel, sameRoute, switches, toSelection,
 } from './policy.js'
+import { sendNotice } from './notify.js'
 import {
   DEFAULT_REFUSAL_MAX_LENGTH, DEFAULT_REFUSAL_PATTERNS, compilePatterns,
   toolSucceededThisTurn, watchRefusal,
@@ -47,21 +48,6 @@ export const SWITCH_EVENT = 'fallback-models/switch'
 export function switchReason(from, to, failure) {
   const what = isRefusal(failure) ? 'refused to answer' : 'failed'
   return `${REASON_PREFIX}: ${routeLabel(from)} ${what} (${failure.code}); continuing on ${routeLabel(to)}`
-}
-
-/**
- * The message sent through `notify` for one switch. A refusal is worded
- * apart: the reply was hidden, not lost to an error.
- */
-export function switchText(info) {
-  const from = routeLabel(info.from)
-  const to = routeLabel(info.to)
-  if (info.refusal) {
-    return `Model fallback: ${from} refused to answer or its filter blocked the reply, in session ${info.sessionId}. `
-      + `The refused reply was hidden, and ${to} is answering instead.`
-  }
-  return `Model fallback: ${from} failed (${failureText(info.failure)}) in session ${info.sessionId}. `
-    + `The work continues on ${to}.`
 }
 
 function freeze(value) {
@@ -250,27 +236,7 @@ export function installFallback(ctx, config) {
     } catch (error) {
       logger.warn('a %s listener failed: %s', SWITCH_EVENT, error instanceof Error ? error.message : String(error))
     }
-    const via = typeof notify?.via === 'string' ? notify.via.trim() : ''
-    if (via === '') return
-    let service
-    try {
-      service = ctx.get(via)
-    } catch {
-      service = undefined
-    }
-    if (typeof service?.send !== 'function') {
-      logger.warn('notify: no running service %s with a send method', via)
-      return
-    }
-    const request = {
-      to: typeof notify.to === 'string' ? notify.to.trim() : notify.to,
-      text: switchText(info),
-      files: [],
-      from: { label: 'dsh-fallback-models', sessionId: info.sessionId },
-    }
-    Promise.resolve()
-      .then(() => service.send(request))
-      .catch(error => logger.warn('notify through %s failed: %s', via, error instanceof Error ? error.message : String(error)))
+    void sendNotice(ctx, logger, info, notify)
   }
 
   /**

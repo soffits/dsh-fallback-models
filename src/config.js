@@ -26,8 +26,8 @@ export const Config = z.object({
   refusalMaxLength: z.natural().default(DEFAULT_REFUSAL_MAX_LENGTH).volatile()
     .description('Longest reply, in characters, that can count as a refusal.'),
   notify: z.object({
-    via: z.string().description('Name of a running DSH service with a send({ to, text, files, from }) method, such as a Telegram plugin\'s topic service. Empty: no message.'),
-    to: z.string().description('Address that service understands, such as a topic\'s thread id.'),
+    via: z.string().description('Name of a running DSH service with a send({ to, chat, text, files, from }) method, such as a Telegram plugin\'s topic service. Empty: no message.'),
+    to: z.string().description('Empty (the default): send to the conversation the switch happened in, as the service\'s topics() list places it; a subagent\'s switch goes to its nearest parent conversation that has a place, and nothing is sent when none has. Set: send every message to this one address, such as a topic\'s thread id.'),
   }).default({}).volatile()
     .description('Optional: also send one short message per switch through another plugin\'s service. Nothing is required; the switch is always shown in the conversation and emitted as the fallback-models/switch event.'),
 })

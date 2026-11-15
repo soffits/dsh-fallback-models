@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Config } from '../src/config.js'
 import { read } from '../src/policy.js'
-import { noticeMessage, switchReason, switchText } from '../src/fallback.js'
+import { noticeMessage, switchReason } from '../src/fallback.js'
+import { switchText } from '../src/notify.js'
 import {
   DEFAULT_REFUSAL_MAX_LENGTH, DEFAULT_REFUSAL_PATTERNS, compilePatterns, refusalMatch, toolSucceededThisTurn, watchRefusal,
 } from '../src/refusal.js'

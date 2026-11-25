@@ -1,5 +1,3 @@
-> **Moved.** This plugin is now part of [@soffits/dsh-companion-runtime](https://github.com/soffits/dsh-companion-runtime) (`fallback-models/`). This repository is archived.
-
 # dsh-fallback-models
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that adds a fallback-model chain. When a model request still fails after DSH uses up its own retries, work continues using the next model you listed instead of ending the turn with an error.
